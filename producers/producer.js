@@ -56,7 +56,7 @@ const date = new Date();
 // Generate data in Apple or Google format, flipping device and location data
 function generateData(user, count) {
     const steps = getHourlySteps(user);
-    const isApple = user.isApple;
+    const isApple = user.isAppleDevice;
     const hasLocation = Math.random() < 0.5;   // Flip location data randomly
 
     let ts = addHours(date, count).toISOString();
