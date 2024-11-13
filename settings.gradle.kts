@@ -1,2 +1,2 @@
-rootProject.name = "chalelnge-steps-processor"
+rootProject.name = "challenge-steps-processor"
 

@@ -1,5 +1,6 @@
 plugins {
     id("java")
+    id("application")
 }
 
 group = "com.ronaldsuwandi"
@@ -22,9 +23,16 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.apache.kafka:kafka-streams-test-utils:3.8.1")
+}
 
+application {
+    mainClass = "com.ronaldsuwandi.Main" // replace with your actual main class path
 }
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = true
+    }
 }

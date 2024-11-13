@@ -38,9 +38,9 @@ const users = Array.from({length: userCount}, (_, index) => ({
 function getHourlySteps(user) {
     switch (user.type) {
         case USER_TYPES.HIGH:
-            return 130 + Math.floor(Math.random() * 50);  // High range hourly steps (>3k/day)
+            return 210 + Math.floor(Math.random() * 50);  // High range hourly steps (>5k/day)
         case USER_TYPES.MEDIUM:
-            return 50 + Math.floor(Math.random() * 50);  // Medium range hourly steps (1000-3000/day)
+            return 50 + Math.floor(Math.random() * 50);  // Medium range hourly steps (1000-5000/day)
         case USER_TYPES.LOW:
             return Math.floor(Math.random() * 30);         // Low range hourly steps (<1000/day)
         case USER_TYPES.LOW_TO_HIGH:

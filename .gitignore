@@ -1,3 +1,8 @@
+### Kafka Streams State store ###
+store/
+###
+
+
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar
