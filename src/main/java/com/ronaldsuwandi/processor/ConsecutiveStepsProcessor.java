@@ -9,8 +9,11 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.TreeMap;
 
 public class ConsecutiveStepsProcessor implements Processor<Windowed<String>, UserStepsDaily, String, String> {
@@ -51,12 +54,19 @@ public class ConsecutiveStepsProcessor implements Processor<Windowed<String>, Us
         stateStore.put(userId, labelHistory); // have to store this again
 
         long timestamp = Instant.now().toEpochMilli();
-        logger.trace("> AFTER label history size = {} => {}", labelHistory.size(), labelHistory.toString());
+        logger.trace("> AFTER label history size = {} => {}", labelHistory.size(), labelHistory);
 
         if (labelHistory.size() < 7) {
             // user doesn't have 7 days worth of history, skip
             context.forward(new Record<>(userId, "", timestamp));
         } else {
+            boolean allConsecutives = allTimestampsContinuous(labelHistory.navigableKeySet(), Duration.ofDays(1));
+            if (!allConsecutives) {
+                logger.info("User has missing gap in the weekly aggregation {}", labelHistory);
+                context.forward(new Record<>(userId, "", timestamp));
+                return;
+            }
+
             boolean sevenDaysMediumOrHigh = labelHistory.values().stream().allMatch(l -> l.equals("daily_medium_stepper") || l.equals("daily_high_stepper"));
             logger.trace("> all seven days medium/high? {}", sevenDaysMediumOrHigh);
             if (sevenDaysMediumOrHigh) {
@@ -65,5 +75,22 @@ public class ConsecutiveStepsProcessor implements Processor<Windowed<String>, Us
                 context.forward(new Record<>(userId, "low", timestamp));
             }
         }
+    }
+
+    public static boolean allTimestampsContinuous(NavigableSet<Long> timestamps, Duration targetDiff) {
+        if (timestamps.size() <= 1) {
+            return true;
+        }
+        Iterator<Long> iterator = timestamps.iterator();
+        Long previous = iterator.next();
+
+        while (iterator.hasNext()) {
+            Long next = iterator.next();
+            if (Math.abs(next - previous) > targetDiff.toMillis()) {
+                return false;
+            }
+            previous = next;
+        }
+        return true;
     }
 }
