@@ -1,68 +1,23 @@
-kakafka connect for transformation
-timezone challenges
-different device - how to reconcile
-    - strategy
-
 # Steps Processor
-A streaming application that aggregate step count for user to label them as low/medium/high daily steppers
+## Overview
+The Steps Processor is a streaming application that aggregates daily step counts per user to classify them as low, 
+medium, or high daily steppers. When a user has consistently been a medium/high stepper over the past 7 days, the 
+system generates a mock notification. This project demonstrates Kafka Streams, utilizing both the DSL and Processor 
+APIs for flexible stream processing. 
 
-Should the user be medium/high for the past 7 days consecutively, it is also trying to send a notification (mock notification)
+## Architecture & Key Design Decisions
 
-The service is written using Kafka Streams, combining the DSL as well as Processor API
+The architecture is divided into four main tasks to ensure modularity and adaptability:
 
-## Setup
-### Prerequisites
-- Java 21
-- Gradle
-- Docker compose
-- Node 23 (for producer code)
+1. Data Normalization: Normalizes data from different sources (Android/iOS) into a unified format.
+2. Steps Aggregation: Aggregates daily and weekly step counts, classifying users based on their activity.
+3. Notification Creation: Checks for conditions to trigger notifications and handles deduplication.
+4. Notification Handling: Mock processing of notifications, representing a connection to an external service.
 
-First start kafka by running docker compose
-```
-docker compose up -d
-```
+This modular approach allows future extraction of each task as a standalone service if necessary. Currently, all 
+tasks run within a single Kafka Streams application to keep the setup straightforward.
 
-Once Kafka is running (check with `docker compose logs kafka -f` or go to Kafka UI at http://localhost:8080) then initialise the topics
-
-```
-./init-topic.sh
-```
-
-### Logging
-Log level is set to "DEBUG" by default, you can use "TRACE" if you want to have a lot more details. This can be set at 
-`src/main/resources/logback.xml` and `src/test/resources/logback-test.xml` respectively
-
-### Run
-Once topics are created, you can then run the Kafka Streams application using Gradle
-
-```
-./gradlew run
-```
-
-In another terminal session, you can start generating incoming data, go to `producers/` directory 
-
-```
-node producer.js MEDIUM 1
-```
-
-This will generate traffic for 1 user that is always medium daily steps. Every second it will shift the timestamp by 1 hour and eventually by the end of the day it will always be medium count of steps
-
-There are also options to do HIGH or LOW or LOW_TO_HIGH
-
-As we get more data, you can see if the user has consistently be a medium/high daily stepper for 7 days, if the user is, then "SEND NOTIFICATION" will be logged in terminal
-
-![](screenshot.png)
-
-### Test
-To run test
-
-```
-./gradlew test
-```
-
-## Architecture & Decisions
-### Overview
-High level diagram of the system below
+### High Level Flow Diagram
 
 ```mermaid
 flowchart TD
@@ -94,91 +49,97 @@ flowchart TD
     end
 ```
 
-The system is split into 4 main tasks
-1. data normalization
-2. steps aggregation
-3. notification creation
-4. notification handler
+## Setup
+### Prerequisites
+- Java 21
+- Gradle
+- Docker compose
+- Node 23 (for the data producer)
 
-### Tasks
-By splitting the system into 4 main tasks, we can then extract it to a separate service should it be required but 
-for the purpose of this project, having them in a single Kafka Streams app would suffice
+### Initial Setup
+Start Kafka by running Docker Compose:
+```
+docker compose up -d
+```
 
-#### Data normalization
-This simply listen to both incoming data for Android and iOS, normalize them into `user-activity-normalized` topic 
-for further processing
+Once Kafka is running (you can confirm with docker compose logs kafka -f or check the Kafka UI at 
+http://localhost:8080), initialize the topics:
 
-#### Steps aggregation
-Next is to perform aggregation on the steps count, this is implemented using Kafka Stream's Windowing (tumbling window) 
-of 1 day with grace period of 1 hour - so if there is data that come late, there is additional 1 window gap where it 
-can still be counted in the day window
+```
+./init-topic.sh
+```
 
-The aggregation uses custom timestamp extractor because we want to use the steps timestamp as the timestamp information 
-and not producer/event time
+### Running the Application
+Run the Kafka Streams Application: Start the main application using Gradle.
+```
+./gradlew run
+```
 
-Data is then stored into KTable for a quick lookup as well as State Store should it needs to restore from disk in case 
-of failure
+Generate Sample Data: In another terminal, navigate to the producers/ directory and run:
+```
+node producer.js MEDIUM 1
+```
 
-Next is to process this daily aggregated steps into weekly information. This is where I have to use Processor API 
-because it is not achievable simply through using Kafka Streams DSL without a lot of intermediary steps
+This generates traffic for a single user with medium daily steps, simulating hourly step count data. You can 
+specify HIGH, LOW, or LOW_TO_HIGH for different step count scenarios.
 
-The Processor then groups the daily steps per user, store them for 7 days and then check for steps counts for all of 
-the 7 days. It then has these 3 checks:
-1. If there is not enough data (daily steps hasn't reach 7 days yet) - we simply forward the request with empty label
-2. If the steps data are all continuous (in this case, the timestamp differences are all 1 days). If this is not the 
-   case, there is a gap (user went offline for few days), so we simply forward the request with empty label as well
-3. If all of them are "medium" or "high", then we forward the request with "medium_or_high" label
-4. Otherwise, we forward the request with "low" label
+As data accumulates, the application will log a "SEND NOTIFICATION" message if a user consistently qualifies 
+as a medium/high stepper for 7 consecutive days.
 
-The weekly aggregation output is stored in `user-steps-7-days-aggregated` topic where the key-value will be 
-`<user_id, 7_days_aggregated_label>` (ie. `<user1, medium_or_high>, <user2, low>`). For this topic, the cleanup policy 
-compaction since it will be used for lookups
+![](screenshot.png)
 
-#### Notification creation
-Simultaneously, this system also listen to `user-activity-normalized` as new steps data coming in. It then perform 
-first join with weekly label; a KTable created from `user-steps-7-days-aggregated` in the prior steps. If the join is 
-successful AND the user label is "medium_or_high" we then proceed to the next step
+### Testing
+Run tests using Gradle:
 
-Next we do left join with `user-notification-id` KTable. This act as a debouncer, so if the user already exists in the 
-user notification id table, it will check the notification timestamp. If current timestamp-notification timestamp is 
-greather than the limit (currently this is hard coded to **10 SECONDS** to make it easy for testing), then we can 
-proceed to create notification, otherwise we simply ignore this so that user doesn't receive too many notifications
+```
+./gradlew test
+```
 
-Notification is then created with a unique notification id (currently it's only hardcoded dummy string)
+The tests cover various scenarios across the normalization, aggregation, and notification stages.
 
-#### Notification handling
-This listens to `user-notifications` topic, and will then proceed with actual notification handling - simply a 
-logging at the moment
+## Detailed Breakdown of Each Task
+### Data Normalization
+The application listens to incoming data from Android and iOS sources, normalizing them into the 
+`user-activity-normalized` topic for further processing.
 
-Unique notification ID is needed so that in a scenario where we actually send notification to 3rd party service 
-(Apple APNS/Firebase/Email), the unique ID will be used by the 3rd party service to prevent duplicate notifications 
-being sent. This is to handle a scenario where notification-handling service went down after sending request to 3rd 
-party but haven't commit the consumer offset and restarted
+### Steps Aggregation
+This task aggregates daily step counts using Kafka Streams' tumbling windows (1 day with a 1-hour grace period). 
+A custom timestamp extractor ensures we use the correct timestamp field. The daily aggregates are stored in a KTable 
+and are used to build weekly aggregations. Weekly aggregation employs the Processor API to store and evaluate daily 
+step data over a 7-day period.
 
+The weekly processor checks for:
+- Continuity of data over the 7-day window
+- Consistency in medium/high step counts to ensure that user has no missing gap (ie. offline for a few days)
+- Outputs a label (medium_or_high or low) based on these checks.
 
-## Limitations and further improvements
-### No checking on location
-Currently notification simply checks for the weekly aggregation, it doesn't perform additional check on pincode/lat/long
+### Notification Creation
+The application continuously monitors `user-activity-normalized` for new step data. When new data arrives, it joins with 
+the weekly label data in `user-steps-7-days-aggregated` to determine if the user qualifies as a "medium_or_high" 
+stepper. A secondary left join with `user-notification-id` implements a debounce mechanism to prevent redundant 
+notifications: if a user was recently notified (within the last **10 seconds** - this is hardcoded for now), no new 
+notification is created. If all conditions are met, a notification message is sent to the downstream topic 
+`user-notifications`.
 
-This is something that can be added in the future
+### Notification Handling
+This task processes the `user-notifications` topic, simulating sending notifications. In a real-world system, the 
+unique notification ID would prevent duplicate notifications and integrate with third-party services.
 
-### Potential stale data
-In a corner case where during 7 days user has always been medium stepper but on current day user is still low. And the 
-incoming steps count comes in and user is now at medium stepper, notification will not be sent because the table hasn't 
-been updated. This is because notification creation and steps aggregation are both running in parallel
+## Limitations and Future Improvements
+### Location-Based Notifications
+Currently, notifications are based only on step counts, with no additional checks for location. 
+Future implementations could add location-based filtering.
 
-Because generally this kind of system expects a continuous data stream, typically this will not be an issue
+## Potential Stale Data
+The parallel processing of steps aggregation and notification creation can lead to potential stale data if a user 
+qualifies as a medium stepper but doesn’t immediately trigger a notification. This can be addressed by combining the 
+two tasks into one, though it would increase coupling.
 
-One way to prevent this is to combine Steps Aggregation and Notification Creation into 1 subtask but this will make the 
-system more tightly coupled
+## Timezone Handling
+The system currently operates in a single timezone. Handling users traveling across timezones would require 
+adjustments to the timestamp extractor and could add complexity to the aggregation logic.
 
-### Timezone
-This assumes the whole system operate in a single timezone. If there is a need for handling different timezone or user 
-switching timezone (traveling), we'll need to update the aggregation to handle that (update timestamp extractor, and 
-handle edge cases)
-
-### Others
-Other limitations/improvements that can be added
-- Extracting config into separate files
-- Add more thorough logging/metrics
-
+## Additional Improvements
+- Configurable Debouncing Timeouts: To make the system more robust.
+- Externalized Configuration: For easier management of settings.
+- Enhanced Logging and Metrics: To improve observability and performance monitoring.
